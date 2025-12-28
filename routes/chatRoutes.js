@@ -1,11 +1,9 @@
 import express from "express";
-import Message from "../models/Message.js";
-import User from "../models/auth.model.js";
+import { db } from "../config/db.js";
 import { getBotReply } from "../services/openrouterService.js";
 
 const router = express.Router();
 
-// Send message
 router.post("/", async (req, res) => {
   const { email, content } = req.body;
 
@@ -14,98 +12,83 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    // 🔍 Check user
-    let user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
+    const [userRows] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
+    if (!userRows.length) return res.status(404).json({ error: "User not found." });
 
-    // 💬 Save user message
-    const userMessage = new Message({
-      user: user._id,
-      sender: "user",
-      content: content.trim(),
-    });
-    await userMessage.save();
+    const userId = userRows[0].id;
 
-    // 🤖 Get bot reply
+    const [userMsgResult] = await db.query(
+      `INSERT INTO messages (user_id, sender, content, type, created_at, updated_at)
+       VALUES (?, 'user', ?, 'text', NOW(), NOW())`,
+      [userId, content.trim()]
+    );
+
     const botReply = await getBotReply(content);
+    const botType = botReply.startsWith("INFO:") ? "info" : "text";
+    const botContent = botType === "info" ? botReply.replace("INFO:", "").trim() : botReply;
 
-    // 💬 Save bot message
-    const botMessage = new Message({
-      user: user._id,
-      sender: "bot",
-      content: botReply,
-    });
-    await botMessage.save();
+    const [botMsgResult] = await db.query(
+      `INSERT INTO messages (user_id, sender, content, type, created_at, updated_at)
+       VALUES (?, 'bot', ?, ?, NOW(), NOW())`,
+      [userId, botContent, botType]
+    );
 
-    res.json({ 
-      success: true,
-      message: botReply 
-    });
+    res.json({ success: true, message: botContent });
   } catch (err) {
-    console.error("❌ Chat error:", err.message);
+    console.error("Chat error:", err.message);
     res.status(500).json({ error: "Something went wrong. Please try again later." });
   }
 });
 
-// Get chat history for a user
 router.get("/history", async (req, res) => {
   const { email } = req.query;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email is required." });
-  }
+  if (!email) return res.status(400).json({ error: "Email is required." });
 
   try {
-    // Find user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
 
-    // Get all messages for the user, grouped by date or session
-    const messages = await Message.find({ user: user._id })
-      .sort({ createdAt: -1 })
-      .select('sender content createdAt')
-      .lean();
-    const groupedMessages = groupMessagesByDate(messages);
-    
-    res.json({
-      success: true,
-      sessions: groupedMessages
-    });
+    const [userRows] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
+    if (!userRows.length) return res.status(404).json({ error: "User not found." });
+
+    const userId = userRows[0].id;
+
+    const [messages] = await db.query(
+      `SELECT sender, content, created_at
+       FROM messages WHERE user_id = ? ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    const grouped = groupMessagesByDate(messages);
+
+    res.json({ success: true, sessions: grouped });
   } catch (err) {
-    console.error("❌ Get history error:", err.message);
+    console.error("Get history error:", err.message);
     res.status(500).json({ error: "Failed to fetch chat history." });
   }
 });
 
-// Helper function to group messages by date
 function groupMessagesByDate(messages) {
   const groups = {};
-  
-  messages.forEach(message => {
-    const date = new Date(message.createdAt).toDateString();
+
+  messages.forEach(msg => {
+    const date = new Date(msg.created_at).toDateString();
     if (!groups[date]) {
       groups[date] = {
         id: date,
-        title: getSessionTitle(message.content),
-        created_at: message.createdAt,
-        updated_at: message.createdAt,
+        title: getSessionTitle(msg.content),
+        created_at: msg.created_at,
+        updated_at: msg.created_at,
         message_count: 0,
         messages: []
       };
     }
-    groups[date].messages.push(message);
+
+    groups[date].messages.push(msg);
     groups[date].message_count++;
-    // Update updated_at to the latest message
-    if (new Date(message.createdAt) > new Date(groups[date].updated_at)) {
-      groups[date].updated_at = message.createdAt;
+    if (new Date(msg.created_at) > new Date(groups[date].updated_at)) {
+      groups[date].updated_at = msg.created_at;
     }
   });
 
-  // Convert to array and sort by updated_at
   return Object.values(groups)
     .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
     .map(group => ({
@@ -114,10 +97,10 @@ function groupMessagesByDate(messages) {
     }));
 }
 
-// Helper function to create session title from first message
+// Helper: Generate short session title
 function getSessionTitle(content) {
-  if (content.length <= 30) return content;
-  return content.substring(0, 30) + '...';
+  if (!content) return "";
+  return content.length <= 30 ? content : content.substring(0, 30) + "...";
 }
 
 export default router;

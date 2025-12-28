@@ -8,12 +8,15 @@ import {
   getUserStats
 } from '../controllers/user.controller.js';
 
-const router = express.Router();
+import { protect } from '../middleware/auth.midleware.js';
+import { authorize } from '../middleware/roleMiddleware.js';
 
+const router = express.Router();
+router.use(protect);
 
 router.get('/stats', getUserStats);
 
-router.get('/', getAllUsers);
+router.get('/', authorize(['admin', 'manager']), getAllUsers);
 
 // Get user by ID
 router.get('/:id', getUserById);

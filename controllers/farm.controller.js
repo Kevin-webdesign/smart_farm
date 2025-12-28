@@ -1,104 +1,157 @@
-import FarmTransaction from '../models/farm.model.js';
-import mongoose from 'mongoose';
+import { db } from "../config/db.js";
 
-// Create
+// ======================
+// CREATE transaction
+// ======================
 export const createTransaction = async (req, res) => {
-    // Require authentication for creating a transaction
-    if (!req.user) {
-        return res.status(401).json({ error: 'Authentication required' });
-    }
-    try {
-        const transactionData = {
-            ...req.body,
-            createdBy: req.user._id
-        };
-        const transaction = new FarmTransaction(transactionData);
-        await transaction.save();
-        res.status(201).json(transaction);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
-};
+  const userId = req.user.id;
+  const { date, crop_activity, type, amount, payment_method, description } = req.body;
 
-// Read all
-export const getAllTransactions = async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+
   try {
-    // Show only transactions created by the authenticated user
-    const transactions = await FarmTransaction.find({ createdBy: req.user._id });
-    res.json(transactions);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const [result] = await db.query(
+      `INSERT INTO farm_transactions
+      (date, crop_activity, type, amount, payment_method, description, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [date, crop_activity, type, amount, payment_method, description, userId]
+    );
+
+    // Get the inserted transaction
+    const [transactionRows] = await db.query(
+      "SELECT * FROM farm_transactions WHERE id = ?",
+      [result.insertId]
+    );
+    const transaction = transactionRows[0];
+
+    // Populate createdBy info
+    const [userRows] = await db.query(
+      "SELECT id, username, email, phone, role, address, district, sector, cell, village, status FROM users WHERE id = ?",
+      [userId]
+    );
+    transaction.created_by = userRows[0];
+
+    res.status(201).json({ success: true, data: transaction });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: err.message });
   }
 };
 
-// Updated getPublicTransactions in farm.controller.js
+// ======================
+// GET all transactions for current user
+// ======================
+export const getAllTransactions = async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM farm_transactions WHERE created_by = ? ORDER BY date DESC",
+      [userId]
+    );
+    res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ======================
+// GET public transactions (all users, with creator info)
+// ======================
 export const getPublicTransactions = async (req, res) => {
   try {
-    const transactions = await FarmTransaction.find()
-      .populate({
-        path: 'createdBy',
-        select: 'userName email phone role address district sector cell village status',
-        match: { _id: { $exists: true } }
-      })
-      .select('-__v')
-      .sort({ date: -1 });
-    
-    // Filter out transactions where createdBy is null
-    const validTransactions = transactions.filter(t => t.createdBy !== null);
-    
-    res.json(validTransactions);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-// Read by ID
-export const getTransactionById = async (req, res) => {
-  try {
-    const transaction = await FarmTransaction.findOne({ 
-      _id: req.params.id, 
-      createdBy: req.user._id 
-    });
-    
-    if (!transaction) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    res.json(transaction);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Update
-export const updateTransaction = async (req, res) => {
-  try {
-    const transaction = await FarmTransaction.findOneAndUpdate(
-      { _id: req.params.id, createdBy: req.user._id },
-      req.body,
-      { new: true, runValidators: true }
+    const [rows] = await db.query(
+      `SELECT ft.*, u.id AS user_id, u.username, u.email, u.phone, u.role, u.address, u.district, u.sector, u.cell, u.village, u.status
+       FROM farm_transactions ft
+       JOIN users u ON ft.created_by = u.id
+       ORDER BY ft.date DESC`
     );
-    
-    if (!transaction) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    res.json(transaction);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
+
+    res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 };
 
-// Delete
-export const deleteTransaction = async (req, res) => {
+// ======================
+// GET transaction by ID (owner only)
+// ======================
+export const getTransactionById = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
   try {
-    const transaction = await FarmTransaction.findOneAndDelete({ 
-      _id: req.params.id, 
-      createdBy: req.user._id 
-    });
-    
-    if (!transaction) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    res.json({ message: 'Transaction deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const [rows] = await db.query(
+      "SELECT * FROM farm_transactions WHERE id = ? AND created_by = ?",
+      [id, userId]
+    );
+
+    if (!rows.length) return res.status(404).json({ error: 'Transaction not found' });
+
+    res.status(200).json({ success: true, data: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ======================
+// UPDATE transaction
+// ======================
+export const updateTransaction = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+  const updates = req.body;
+
+  try {
+    const [existingRows] = await db.query(
+      "SELECT * FROM farm_transactions WHERE id = ? AND created_by = ?",
+      [id, userId]
+    );
+    if (!existingRows.length) return res.status(404).json({ error: 'Transaction not found' });
+
+    const fields = Object.keys(updates).map(k => `${k} = ?`).join(", ");
+    const values = Object.values(updates);
+
+    await db.query(
+      `UPDATE farm_transactions SET ${fields}, updated_at = NOW() WHERE id = ? AND created_by = ?`,
+      [...values, id, userId]
+    );
+
+    const [updatedRows] = await db.query(
+      "SELECT * FROM farm_transactions WHERE id = ?",
+      [id]
+    );
+    res.status(200).json({ success: true, data: updatedRows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// ======================
+// DELETE transaction
+// ======================
+export const deleteTransaction = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const [existingRows] = await db.query(
+      "SELECT * FROM farm_transactions WHERE id = ? AND created_by = ?",
+      [id, userId]
+    );
+    if (!existingRows.length) return res.status(404).json({ error: 'Transaction not found' });
+
+    await db.query(
+      "DELETE FROM farm_transactions WHERE id = ? AND created_by = ?",
+      [id, userId]
+    );
+    res.status(200).json({ success: true, message: 'Transaction deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 };

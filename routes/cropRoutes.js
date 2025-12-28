@@ -1,7 +1,6 @@
 import express from "express";
 import {
   getCropPlans,
-  getAllCropPlansForStaff,
   getCropPlan,
   createCropPlan,
   updateCropPlan,
@@ -15,7 +14,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get("/", getCropPlans);
-router.get("/staff",protect, getAllCropPlansForStaff);
+router.get("/staff",protect, getCropPlans);
 router.get("/:id",protect, getCropPlan);
 router.post("/",protect, createCropPlan);
 router.put("/:id", protect , updateCropPlan);

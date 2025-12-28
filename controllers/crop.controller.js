@@ -1,143 +1,170 @@
-import CropPlan from "../models/crop.model.js";
+import { db } from "../config/db.js";
 
-// GET all crop plans
-export const getCropPlans = async (req, res) => {
-  try {
-    const crops = await CropPlan.find({ createdBy: req.user.id })
-      .populate("createdBy", "userName email")
-      .sort({ createdAt: -1 });
-    
-    res.status(200).json({
-      success: true,
-      data: crops,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// ADMIN: GET all crop plans with owner details
-export const getAllCropPlansForStaff = async (req, res) => {
-  try {
-    const crops = await CropPlan.find()
-      .populate("createdBy", "userName email role phone address")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      data: crops,
-    });
-  } catch (error) {
-    console.error("Error fetching crop plans for admin:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-
-// GET single crop plan
-export const getCropPlan = async (req, res) => {
-  try {
-    const crop = await CropPlan.findById(req.params.id)
-      .populate("createdBy", "userName email");
-    
-    if (!crop) {
-      return res.status(404).json({ message: "Crop plan not found" });
-    }
-    
-    res.status(200).json({
-      success: true,
-      data: crop,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// CREATE crop plan
+// ======================
+// CREATE Crop Plan
+// ======================
 export const createCropPlan = async (req, res) => {
-  try {
-    const {
-      cropName,
-      variety,
-      fieldArea,
-      plantingDate,
-      expectedHarvestDate,
-      expectedYield,
-      cost,
-      notes,
-    } = req.body;
+  const {
+    crop_name,
+    variety,
+    field_area,
+    planting_date,
+    expected_harvest_date,
+    expected_yield,
+    cost,
+    notes,
+  } = req.body;
+  const userId = req.user.id;
 
-    const newCrop = await CropPlan.create({
-      cropName,
+  try {
+    const [result] = await db.query(
+      `INSERT INTO crop_plans
+       (crop_name, variety, field_area, planting_date, expected_harvest_date, expected_yield, cost, notes, created_by)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      [crop_name, variety, field_area, planting_date, expected_harvest_date, expected_yield, cost || 0, notes, userId]
+    );
+
+    const cropId = result.insertId;
+
+    const [userRes] = await db.query(
+      "SELECT id, username, email, role, phone, address_district, address_sector, address_cell, address_village FROM users WHERE id=?",
+      [userId]
+    );
+
+    const crop = {
+      id: cropId,
+      crop_name,
       variety,
-      fieldArea,
-      plantingDate,
-      expectedHarvestDate,
-      expectedYield,
+      field_area,
+      planting_date,
+      expected_harvest_date,
+      expected_yield,
       cost: cost || 0,
       notes,
-      createdBy: req.user._id,
-    });
-
-    const populatedCrop = await CropPlan.findById(newCrop._id)
-      .populate("createdBy", "userName email");
+      created_by: userRes[0],
+    };
 
     res.status(201).json({
       success: true,
       message: "Crop plan created successfully",
-      data: populatedCrop,
+      data: crop,
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// UPDATE crop plan
+// ======================
+// GET all Crop Plans
+// ======================
+export const getCropPlans = async (req, res) => {
+  const userId = req.user.id;
+  const role = req.user.role;
+
+  try {
+    const [rows] = await db.query(
+      role === "admin"
+        ? "SELECT * FROM crop_plans ORDER BY created_at DESC"
+        : "SELECT * FROM crop_plans WHERE created_by=? ORDER BY created_at DESC",
+      role === "admin" ? [] : [userId]
+    );
+
+    const crops = await Promise.all(
+      rows.map(async (crop) => {
+        const [userRes] = await db.query(
+          "SELECT id, username, email, role, phone, address_district, address_sector, address_cell, address_village FROM users WHERE id=?",
+          [crop.created_by]
+        );
+        crop.created_by = userRes[0];
+        return crop;
+      })
+    );
+
+    res.status(200).json({ success: true, data: crops });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ======================
+// GET single Crop Plan
+// ======================
+export const getCropPlan = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [rows] = await db.query("SELECT * FROM crop_plans WHERE id=?", [id]);
+    const crop = rows[0];
+    if (!crop) return res.status(404).json({ message: "Crop plan not found" });
+
+    const [userRes] = await db.query(
+      "SELECT id, username, email, role, phone, address_district, address_sector, address_cell, address_village FROM users WHERE id=?",
+      [crop.created_by]
+    );
+    crop.created_by = userRes[0];
+
+    res.status(200).json({ success: true, data: crop });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ======================
+// UPDATE Crop Plan
+// ======================
 export const updateCropPlan = async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const userId = req.user.id;
+
   try {
-    const crop = await CropPlan.findById(req.params.id);
-    
-    if (!crop) {
-      return res.status(404).json({ message: "Crop plan not found" });
-    }
+    const [existingRows] = await db.query("SELECT * FROM crop_plans WHERE id=?", [id]);
+    if (!existingRows.length) return res.status(404).json({ message: "Crop plan not found" });
 
-    const updatedCrop = await CropPlan.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    ).populate("createdBy", "userName email");
+    if (existingRows[0].created_by !== userId && req.user.role !== "admin")
+      return res.status(403).json({ message: "Unauthorized" });
 
-    res.status(200).json({
-      success: true,
-      message: "Crop plan updated successfully",
-      data: updatedCrop,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+    const fields = Object.keys(updates).map((k) => `${k}=?`).join(", ");
+    const values = Object.values(updates);
+
+    await db.query(`UPDATE crop_plans SET ${fields}, updated_at=NOW() WHERE id=?`, [...values, id]);
+
+    const [updatedRows] = await db.query("SELECT * FROM crop_plans WHERE id=?", [id]);
+    const [userRes] = await db.query(
+      "SELECT id, username, email, role, phone, address_district, address_sector, address_cell, address_village FROM users WHERE id=?",
+      [updatedRows[0].created_by]
+    );
+    updatedRows[0].created_by = userRes[0];
+
+    res.status(200).json({ success: true, message: "Crop plan updated successfully", data: updatedRows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// DELETE crop plan
+// ======================
+// DELETE Crop Plan
+// ======================
 export const deleteCropPlan = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
   try {
-    const crop = await CropPlan.findById(req.params.id);
-    
-    if (!crop) {
-      return res.status(404).json({ message: "Crop plan not found" });
-    }
+    const [existingRows] = await db.query("SELECT * FROM crop_plans WHERE id=?", [id]);
+    if (!existingRows.length) return res.status(404).json({ message: "Crop plan not found" });
 
-    await CropPlan.findByIdAndDelete(req.params.id);
+    if (existingRows[0].created_by !== userId && req.user.role !== "admin")
+      return res.status(403).json({ message: "Unauthorized" });
 
-    res.status(200).json({
-      success: true,
-      message: "Crop plan deleted successfully",
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+    await db.query("DELETE FROM crop_plans WHERE id=?", [id]);
+
+    res.status(200).json({ success: true, message: "Crop plan deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };

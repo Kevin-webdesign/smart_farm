@@ -2,12 +2,20 @@ import mongoose from "mongoose";
 const userSchema = new mongoose.Schema(
   {
     userName: String,
-    email: { type: String, required: true, unique: true },
+    email: { 
+      type: String, 
+      unique: true,
+      sparse: true
+    },
     password: String,
-    phone: Number,
-    role : {
+    phone: { 
+      type: String, 
+      unique: true,
+      sparse: true
+    },
+    role: {
       type: String,
-      default : "admin",
+      default: "client",
     },
     address: {
       district: String,
@@ -15,9 +23,9 @@ const userSchema = new mongoose.Schema(
       cell: String,
       village: String,
     },
-    Status : {
+    status: {
       type: String,
-      default : "active",
+      default: "active",
     },
     otp: String,
     otpExpires: Date,
@@ -25,8 +33,6 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-
-// Prevent OverwriteModelError
-const User = mongoose.models.User || mongoose.model('User', userSchema);
-
+// ✅ Prevent model overwrite during hot reloads
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 export default User;

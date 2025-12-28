@@ -9,15 +9,15 @@ import {
   verifyResetOtp,
   resetPassword,
 } from "../controllers/auth.controller.js";
-import verifyAuth from "../middleware/auth.midleware.js";
+import {protect} from "../middleware/auth.midleware.js";
 
 const route = express.Router();
 
 route.post("/register", registerUser);
 route.post("/login", login);
 route.post("/logout", logout);
-route.get("/profile", verifyAuth, getProfile);
-route.put("/profile", verifyAuth, updateProfile);
+route.get("/profile", protect, getProfile);
+route.put("/profile", protect, updateProfile);
 
 // Password reset routes
 route.post("/forgot-password", forgotPassword);

@@ -1,23 +1,30 @@
-// middleware/verifyAuth.js
 import jwt from "jsonwebtoken";
-import userModel from "../models/auth.model.js";
+import { db } from "../config/db.js";
 
-const verifyToken = async (req, res, next) => {
+export const protect = async (req, res, next) => {
   try {
-    const token = req.cookies.session;
-    if (!token) return res.status(401).json({ message: "Not Authenticated" });
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer "))
+      return res.status(401).json({ message: "Not authenticated" });
+
+    const token = authHeader.split(" ")[1];
+
+    const [blacklist] = await db.query("SELECT id FROM token_blacklist WHERE token = ? LIMIT 1", [token]);
+    if (blacklist.length) return res.status(401).json({ message: "Token invalidated" });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await userModel.findById(decoded.userId).select("-password");
 
-    if (!user) return res.status(401).json({ message: "User not found" });
+    const [rows] = await db.query(
+      "SELECT id, username, email, phone, role FROM users WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+      [decoded.userId]
+    );
 
-    req.user = user;
+    if (!rows.length) return res.status(401).json({ message: "User not found" });
+
+    req.user = rows[0];
     next();
-  } catch (error) {
-    return res.status(401).json({ message: "Invalid or expired token" });
+  } catch (err) {
+    console.error(err);
+    res.status(401).json({ message: "Invalid or expired token" });
   }
 };
-
-export const protect = verifyToken;
-export default verifyToken;

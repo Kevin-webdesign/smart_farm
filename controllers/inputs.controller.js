@@ -1,141 +1,222 @@
-// inputs.controller.js
-import Inputs from "../models/inputs.model.js";
+// import { db } from "../config/db.js";
+
+// // ======================
+// // CREATE input
+// // ======================
+// export const createInput = async (req, res) => {
+//   const { name, amount, input_date, description } = req.body;
+//   const userId = req.user.id;
+
+//   try {
+//     const [result] = await db.query(
+//       `INSERT INTO inputs (name, amount, input_date, description, created_by)
+//        VALUES (?, ?, ?, ?, ?)`,
+//       [name, amount, input_date || new Date(), description, userId]
+//     );
+
+//     // Fetch inserted input
+//     const [rows] = await db.query("SELECT * FROM inputs WHERE id = ?", [result.insertId]);
+//     res.status(201).json({ success: true, input: rows[0] });
+//   } catch (err) {
+//     console.error("Error creating input:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// // ======================
+// // GET all inputs (admin sees all)
+// // ======================
+// export const getInputs = async (req, res) => {
+//   const userRole = req.user.role;
+//   const userId = req.user.id;
+
+//   try {
+//     const [rows] = await db.query(
+//       userRole === "admin"
+//         ? `SELECT * FROM inputs ORDER BY created_at DESC`
+//         : `SELECT * FROM inputs WHERE created_by = ? ORDER BY created_at DESC`,
+//       userRole === "admin" ? [] : [userId]
+//     );
+
+//     res.status(200).json({ success: true, inputs: rows });
+//   } catch (err) {
+//     console.error("Error fetching inputs:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// // ======================
+// // GET single input
+// // ======================
+// export const getInputById = async (req, res) => {
+//   const { id } = req.params;
+//   const userId = req.user.id;
+
+//   try {
+//     const [rows] = await db.query("SELECT * FROM inputs WHERE id = ?", [id]);
+//     if (!rows.length) return res.status(404).json({ message: "Input not found" });
+
+//     const input = rows[0];
+//     if (input.created_by !== userId && req.user.role !== "admin")
+//       return res.status(403).json({ message: "Access denied" });
+
+//     res.status(200).json({ success: true, input });
+//   } catch (err) {
+//     console.error("Error fetching input:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// // ======================
+// // UPDATE input
+// // ======================
+// export const updateInput = async (req, res) => {
+//   const { id } = req.params;
+//   const updates = req.body;
+//   const userId = req.user.id;
+
+//   try {
+//     const [existingRows] = await db.query("SELECT * FROM inputs WHERE id = ?", [id]);
+//     if (!existingRows.length) return res.status(404).json({ message: "Input not found" });
+
+//     const input = existingRows[0];
+//     if (input.created_by !== userId && req.user.role !== "admin")
+//       return res.status(403).json({ message: "Unauthorized" });
+
+//     const setFields = Object.keys(updates).map((k) => `${k} = ?`).join(", ");
+//     const values = Object.values(updates);
+
+//     await db.query(`UPDATE inputs SET ${setFields}, updated_at = NOW() WHERE id = ?`, [...values, id]);
+
+//     const [updatedRows] = await db.query("SELECT * FROM inputs WHERE id = ?", [id]);
+//     res.status(200).json({ success: true, input: updatedRows[0] });
+//   } catch (err) {
+//     console.error("Error updating input:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// // ======================
+// // DELETE input
+// // ======================
+// export const deleteInput = async (req, res) => {
+//   const { id } = req.params;
+//   const userId = req.user.id;
+
+//   try {
+//     const [existingRows] = await db.query("SELECT * FROM inputs WHERE id = ?", [id]);
+//     if (!existingRows.length) return res.status(404).json({ message: "Input not found" });
+
+//     const input = existingRows[0];
+//     if (input.created_by !== userId && req.user.role !== "admin")
+//       return res.status(403).json({ message: "Unauthorized" });
+
+//     await db.query("DELETE FROM inputs WHERE id = ?", [id]);
+//     res.status(200).json({ success: true, message: "Input deleted successfully" });
+//   } catch (err) {
+//     console.error("Error deleting input:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+
+import { db } from "../config/db.js";
 
 // Create input
 export const createInput = async (req, res) => {
+  const { name, amount, input_date, description } = req.body;
+  const userId = req.user.id;
+
   try {
-    const { Name, amount, Inputdate = new Date(), description } = req.body;
-
-    const newInput = await Inputs.create({
-      Name,
-      amount,
-      Inputdate,
-      description,
-      createdBy: req.user.id,
-    });
-
-    // populate createdBy (fetch username & email from User model)
-    const populatedInput = await Inputs.findById(newInput._id).populate(
-      "createdBy",
-      "userName email"
+    const [result] = await db.query(`
+      INSERT INTO inputs (name, amount, input_date, description, created_by)
+      VALUES (?, ?, ?, ?, ?)`,
+      [name, amount, input_date || new Date(), description, userId]
     );
 
-    res.status(201).json({
-      success: true,
-      message: "Input added successfully",
-      data: populatedInput,
-    });
-  } catch (error) {
-    console.error("Error in createInput:", error);
-    res.status(500).json({ message: "Internal server error" });
+    const [input] = await db.query(`SELECT * FROM inputs WHERE id = ?`, [result.insertId]);
+    res.status(201).json({ success: true, input: input[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Get all inputs (user sees their own, admin sees all)
+// Get all inputs
 export const getInputs = async (req, res) => {
+  const { role, id: userId } = req.user;
   try {
-    let query = {};
-    
-    // If user is not admin, only show their own inputs
-    if (req.user.role !== 'admin') {
-      query.createdBy = req.user.id;
-    }
-    
-    const inputs = await Inputs.find(query).populate("createdBy", "userName email");
-    
-    res.status(200).json({
-      success: true,
-      data: inputs,
-    });
-  } catch (error) {
-    console.error("Error in getInputs:", error);
-    res.status(500).json({ message: "Internal server error" });
+    const [inputs] = await db.query(
+      role === 'admin'
+        ? `SELECT * FROM inputs ORDER BY created_at DESC`
+        : `SELECT * FROM inputs WHERE created_by = ? ORDER BY created_at DESC`,
+      role === 'admin' ? [] : [userId]
+    );
+
+    res.json({ success: true, inputs });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Update input - ensure users can only update their own inputs unless admin
-export const updateInput = async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // First find the input to check ownership
-    const existingInput = await Inputs.findById(id);
-    
-    if (!existingInput) {
-      return res.status(404).json({ message: "Input not found" });
-    }
-    
-    // Check if user owns this input or is admin
-    if (existingInput.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Access denied. You can only update your own inputs." });
-    }
-    
-    const updated = await Inputs.findByIdAndUpdate(id, req.body, {
-      new: true,
-    }).populate("createdBy", "userName email");
-
-    res.status(200).json({
-      success: true,
-      message: "Input updated successfully",
-      data: updated,
-    });
-  } catch (error) {
-    console.error("Error in updateInput:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Delete input with ownership check
-export const deleteInput = async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // First find the input to check ownership
-    const existingInput = await Inputs.findById(id);
-    
-    if (!existingInput) {
-      return res.status(404).json({ message: "Input not found" });
-    }
-    
-    // Check if user owns this input or is admin
-    if (existingInput.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Access denied. You can only delete your own inputs." });
-    }
-    
-    await Inputs.findByIdAndDelete(id);
-    
-    res.status(200).json({
-      success: true,
-      message: "Input deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error in deleteInput:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Get single input with ownership check
+// Get single input
 export const getInputById = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
   try {
-    const { id } = req.params;
-    
-    const input = await Inputs.findById(id).populate("createdBy", "userName email");
-    
-    if (!input) {
-      return res.status(404).json({ message: "Input not found" });
-    }
-    
-    // Check if user owns this input or is admin
-    if (input.createdBy._id.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Access denied. You can only view your own inputs." });
-    }
-    
-    res.status(200).json({
-      success: true,
-      data: input,
-    });
-  } catch (error) {
-    console.error("Error in getInputById:", error);
-    res.status(500).json({ message: "Internal server error" });
+    const [rows] = await db.query(`SELECT * FROM inputs WHERE id = ?`, [id]);
+    const input = rows[0];
+
+    if (!input) return res.status(404).json({ message: "Input not found" });
+    if (input.created_by !== userId && req.user.role !== 'admin') return res.status(403).json({ message: "Access denied" });
+
+    res.json({ success: true, input });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Update input
+export const updateInput = async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const userId = req.user.id;
+
+  try {
+    const [existing] = await db.query(`SELECT * FROM inputs WHERE id = ?`, [id]);
+    if (!existing.length) return res.status(404).json({ message: "Input not found" });
+    if (existing[0].created_by !== userId && req.user.role !== 'admin') return res.status(403).json({ message: "Unauthorized" });
+
+    const fields = Object.keys(updates).map(k => `${k} = ?`).join(", ");
+    const values = [...Object.values(updates), id];
+
+    await db.query(`UPDATE inputs SET ${fields}, updated_at = NOW() WHERE id = ?`, values);
+
+    const [updated] = await db.query(`SELECT * FROM inputs WHERE id = ?`, [id]);
+    res.json({ success: true, input: updated[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Delete input
+export const deleteInput = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  try {
+    const [existing] = await db.query(`SELECT * FROM inputs WHERE id = ?`, [id]);
+    if (!existing.length) return res.status(404).json({ message: "Input not found" });
+    if (existing[0].created_by !== userId && req.user.role !== 'admin') return res.status(403).json({ message: "Unauthorized" });
+
+    await db.query(`DELETE FROM inputs WHERE id = ?`, [id]);
+    res.json({ success: true, message: "Input deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };

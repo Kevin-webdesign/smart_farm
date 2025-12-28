@@ -7,7 +7,7 @@ import {
   deleteTransaction,
   getPublicTransactions
 } from '../controllers/farm.controller.js';
-import verifyToken from '../middleware/auth.midleware.js'; 
+import {protect} from '../middleware/auth.midleware.js'; 
 
 const router = express.Router();
 
@@ -15,7 +15,7 @@ const router = express.Router();
 router.get('/public/all', getPublicTransactions);
 
 // All other routes require authentication
-router.use(verifyToken);
+router.use(protect);
 
 router.post('/', createTransaction);
 router.get('/', getAllTransactions);

@@ -1,135 +1,98 @@
-import Role from '../models/role.model.js';
-import mongoose from 'mongoose';
+import { db } from "../config/db.js";
 
+
+// Get all roles
 export const getRoles = async (req, res) => {
   try {
-    const roles = await Role.find();
-    res.json(roles);
+    const result = await db.query(`SELECT * FROM roles ORDER BY created_at DESC`);
+    res.json({ success: true, data: result[0] });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
+// Create Role
 export const createRole = async (req, res) => {
   try {
-    const role = new Role(req.body);
-    await role.save();
-    res.status(201).json(role);
+    const { name, description, permissions } = req.body;
+
+    // Check if role already exists
+    const exists = await db.query(`SELECT id FROM roles WHERE name=?`, [name]);
+    if (exists[0].length) {
+      return res.status(400).json({ success: false, message: "Role name already exists" });
+    }
+
+    const result = await db.query(
+      `INSERT INTO roles (name, description, permissions) VALUES (?, ?, ?)`,
+      [name, description, JSON.stringify(permissions)]
+    );
+
+    const newRoleId = result[0].insertId;
+    const newRole = await db.query(`SELECT * FROM roles WHERE id=?`, [newRoleId]);
+
+    res.status(201).json({ success: true, data: newRole[0][0] });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Update Role - Fixed version
+// Update Role
 export const updateRole = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Validate ID format
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Invalid role ID format' 
-      });
-    }
+    const { name, description, permissions } = req.body;
 
     // Check if role exists
-    const existingRole = await Role.findById(id);
-    if (!existingRole) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Role not found' 
-      });
-    }
+    const existing = await db.query(`SELECT * FROM roles WHERE id=?`, [id]);
+    if (!existing[0].length) return res.status(404).json({ success: false, message: "Role not found" });
 
-    // Prepare update data
-    const updateData = {
-      name: req.body.name || existingRole.name,
-      description: req.body.description || existingRole.description,
-      permissions: req.body.permissions || existingRole.permissions
-    };
-
-    // Perform update
-    const updatedRole = await Role.findByIdAndUpdate(
-      id,
-      updateData,
-      { 
-        new: true,        // Return the updated document
-        runValidators: true // Run model validations
-      }
+    // Update role
+    const updatedRole = await db.query(
+      `UPDATE roles SET 
+         name = COALESCE(?, name),
+         description = COALESCE(?, description),
+         permissions = COALESCE(?, permissions),
+         updated_at = NOW()
+       WHERE id = ?`,
+      [
+        name,
+        description,
+        permissions ? JSON.stringify(permissions) : null,
+        id
+      ]
     );
 
-    if (!updatedRole) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Role not found after update attempt' 
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: updatedRole,
-      message: 'Role updated successfully'
-    });
-
+    const role = await db.query(`SELECT * FROM roles WHERE id=?`, [id]);
+    res.status(200).json({ success: true, data: role[0][0], message: "Role updated successfully" });
   } catch (err) {
-    console.error('Update Role Error:', err);
-    res.status(500).json({
-      success: false,
-      message: err.message || 'Failed to update role'
-    });
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Delete Role - Fixed version
+// Delete Role
 export const deleteRole = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate ID format
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Invalid role ID format' 
-      });
+    // Check if role exists
+    const existing = await db.query(`SELECT * FROM roles WHERE id=?`, [id]);
+    if (!existing[0].length) return res.status(404).json({ success: false, message: "Role not found" });
+
+    const role = existing[0][0];
+
+    // Check if role has users
+    if (role.user_count > 0) {
+      return res.status(400).json({ success: false, message: "Cannot delete role with assigned users" });
     }
 
-    // Check if role exists and can be deleted
-    const role = await Role.findById(id);
-    if (!role) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Role not found' 
-      });
-    }
-
-    if (role.userCount > 0) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Cannot delete role with assigned users' 
-      });
-    }
-
-    // Perform deletion
-    const result = await Role.deleteOne({ _id: id });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Role not found or already deleted' 
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Role deleted successfully'
-    });
-
+    // Delete role
+    await db.query(`DELETE FROM roles WHERE id=?`, [id]);
+    res.status(200).json({ success: true, message: "Role deleted successfully" });
   } catch (err) {
-    console.error('Delete Role Error:', err);
-    res.status(500).json({
-      success: false,
-      message: err.message || 'Failed to delete role'
-    });
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };

@@ -1,215 +1,245 @@
-import Notification from '../models/notification.model.js';
+import { db } from "../config/db.js";
 
-// Get notifications for current user
-export const getUserNotifications = async (req, res) => {
+// ======================
+// CREATE notification (single or broadcast)
+// ======================
+// export const createNotification = async (req, res) => {
+//   const { title, message, type, priority, category, recipients = [], data, actionUrl, expiresAt } = req.body;
+//   const createdBy = req.user.id;
+
+//   try {
+//     // Insert notification
+//     const [result] = await db.query(
+//       `INSERT INTO notifications (title, message, type, priority, category, data, action_url, expires_at, created_by)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       [title, message, type || 'info', priority || 'medium', category || 'general', data || null, actionUrl || null, expiresAt || null, createdBy]
+//     );
+
+//     const notificationId = result.insertId;
+
+//     // Insert recipients
+//     if (recipients.length) {
+//       const values = recipients.map(() => '(?, ?)').join(', ');
+//       const params = [];
+//       recipients.forEach(userId => params.push(notificationId, userId));
+//       await db.query(`INSERT INTO notification_recipients (notification_id, user_id) VALUES ${values}`, params);
+//     }
+
+//     // Fetch created notification
+//     const [notifRows] = await db.query("SELECT * FROM notifications WHERE id = ?", [notificationId]);
+
+//     res.status(201).json({ success: true, notification: notifRows[0] });
+//   } catch (err) {
+//     console.error("Error creating notification:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+export const createNotification = async (req, res) => {
+  const { title, message, type = 'info', priority = 'medium', category = 'general', recipients = [], data, actionUrl, expiresAt } = req.body;
+  const createdBy = req.user.id;
+
   try {
-    const { page = 1, limit = 20, type, priority, unreadOnly = false } = req.query;
-    const skip = (page - 1) * limit;
-    const userId = req.user.id;
+    const [notif] = await db.query(`
+      INSERT INTO notifications (title, message, type, priority, category, data, action_url, expires_at, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, message, type, priority, category, data || null, actionUrl || null, expiresAt || null, createdBy]
+    );
 
-    // Build query
-    let query = {
-      'recipients.userId': userId,
-      status: 'active'
-    };
+    const notificationId = notif.insertId;
 
-    if (type) query.type = type;
-    if (priority) query.priority = priority;
-    if (unreadOnly === 'true') {
-      query['recipients.readAt'] = { $exists: false };
+    if (recipients.length) {
+      const values = recipients.map(userId => [notificationId, userId]);
+      await db.query(`INSERT INTO notification_recipients (notification_id, user_id) VALUES ?`, [values]);
     }
 
-    const notifications = await Notification.find(query)
-      .populate('createdBy', 'userName email')
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+    const [createdNotif] = await db.query(`SELECT * FROM notifications WHERE id = ?`, [notificationId]);
+    res.status(201).json({ success: true, notification: createdNotif[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
-    const total = await Notification.countDocuments(query);
-    const unreadCount = await Notification.countDocuments({
-      'recipients.userId': userId,
-      'recipients.readAt': { $exists: false },
-      status: 'active'
-    });
+// ======================
+// GET notifications for user (pagination & unread filter)
+// ======================
+export const getUserNotifications = async (req, res) => {
+  const { page = 1, limit = 20, unreadOnly } = req.query;
+  const userId = req.user.id;
+  const offset = (page - 1) * limit;
+
+  try {
+    let query = `
+      SELECT n.*, nr.read_at
+      FROM notifications n
+      JOIN notification_recipients nr ON n.id = nr.notification_id
+      WHERE nr.user_id = ? AND n.status = 'active'
+    `;
+    const params = [userId];
+
+    if (unreadOnly === 'true') query += ' AND nr.read_at IS NULL';
+
+    query += ' ORDER BY n.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [rows] = await db.query(query, params);
+
+    const [[{ total }]] = await db.query(
+      `SELECT COUNT(*) AS total FROM notification_recipients nr
+       JOIN notifications n ON n.id = nr.notification_id
+       WHERE nr.user_id = ? AND n.status = 'active'`,
+      [userId]
+    );
+
+    const [[{ unread }]] = await db.query(
+      `SELECT COUNT(*) AS unread FROM notification_recipients nr
+       JOIN notifications n ON n.id = nr.notification_id
+       WHERE nr.user_id = ? AND nr.read_at IS NULL AND n.status = 'active'`,
+      [userId]
+    );
 
     res.json({
-      notifications,
-      unreadCount,
+      notifications: rows,
+      unreadCount: parseInt(unread),
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / limit),
-        total
+        total: parseInt(total)
       }
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    console.error("Error fetching notifications:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Mark notification as read
+// ======================
+// MARK notification as read
+// ======================
 export const markAsRead = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
+  const { id } = req.params;
+  const userId = req.user.id;
 
-    const notification = await Notification.findOneAndUpdate(
-      { 
-        _id: id, 
-        'recipients.userId': userId 
-      },
-      { 
-        $set: { 'recipients.$.readAt': new Date() } 
-      },
-      { new: true }
+  try {
+    const [result] = await db.query(
+      `UPDATE notification_recipients SET read_at = NOW() WHERE notification_id = ? AND user_id = ?`,
+      [id, userId]
     );
 
-    if (!notification) {
-      return res.status(404).json({ message: 'Notification not found' });
-    }
+    if (result.affectedRows === 0) return res.status(404).json({ message: "Notification not found" });
 
-    res.json({ message: 'Notification marked as read' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.json({ success: true, message: "Notification marked as read" });
+  } catch (err) {
+    console.error("Error marking as read:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Mark all notifications as read
+// ======================
+// MARK all as read
+// ======================
 export const markAllAsRead = async (req, res) => {
-  try {
-    const userId = req.user.id;
+  const userId = req.user.id;
 
-    await Notification.updateMany(
-      { 
-        'recipients.userId': userId,
-        'recipients.readAt': { $exists: false }
-      },
-      { 
-        $set: { 'recipients.$.readAt': new Date() } 
-      }
+  try {
+    await db.query(
+      `UPDATE notification_recipients SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL`,
+      [userId]
     );
 
-    res.json({ message: 'All notifications marked as read' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.json({ success: true, message: "All notifications marked as read" });
+  } catch (err) {
+    console.error("Error marking all as read:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Create notification (admin only)
-export const createNotification = async (req, res) => {
-  try {
-    const { title, message, type, priority, category, recipients, data, actionUrl, expiresAt } = req.body;
-
-    const notification = new Notification({
-      title,
-      message,
-      type,
-      priority,
-      category,
-      recipients: recipients.map(userId => ({ userId })),
-      data,
-      actionUrl,
-      expiresAt,
-      createdBy: req.user.id
-    });
-
-    await notification.save();
-    await notification.populate('createdBy', 'userName email');
-
-    res.status(201).json(notification);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-};
-
-// Create broadcast notification (admin only)
-export const createBroadcast = async (req, res) => {
-  try {
-    const { title, message, type, priority, category, userRoles, data, actionUrl, expiresAt } = req.body;
-
-    // Get users based on roles
-    const User = require('../models/user.model.js').default;
-    let targetUsers;
-    
-    if (userRoles && userRoles.length > 0) {
-      targetUsers = await User.find({ role: { $in: userRoles } }).select('_id');
-    } else {
-      targetUsers = await User.find({ status: 'active' }).select('_id');
-    }
-
-    const recipients = targetUsers.map(user => ({ userId: user._id }));
-
-    const notification = new Notification({
-      title,
-      message,
-      type,
-      priority,
-      category,
-      recipients,
-      data,
-      actionUrl,
-      expiresAt,
-      createdBy: req.user.id
-    });
-
-    await notification.save();
-    await notification.populate('createdBy', 'userName email');
-
-    res.status(201).json(notification);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-};
-
-// Delete notification
+// ======================
+// DELETE notification (admin or sender)
+// ======================
 export const deleteNotification = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
   try {
-    const notification = await Notification.findByIdAndDelete(req.params.id);
-    if (!notification) {
-      return res.status(404).json({ message: 'Notification not found' });
-    }
-    res.json({ message: 'Notification deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    const [result] = await db.query(
+      `DELETE FROM notifications WHERE id = ? AND created_by = ?`,
+      [id, userId]
+    );
+
+    if (result.affectedRows === 0) return res.status(404).json({ message: "Notification not found or unauthorized" });
+
+    res.json({ success: true, message: "Notification deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting notification:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Get notification statistics (admin only)
+// ======================
+// BROADCAST notification
+// ======================
+export const createBroadcast = async (req, res) => {
+  const { title, message, type, priority, category, userRoles = [], data, actionUrl, expiresAt } = req.body;
+  const createdBy = req.user.id;
+
+  try {
+    // Fetch target users
+    let query = 'SELECT id FROM users WHERE status = ?';
+    let params = ['active'];
+
+    if (userRoles.length > 0) {
+      const placeholders = userRoles.map(() => '?').join(',');
+      query = `SELECT id FROM users WHERE role IN (${placeholders}) AND status = ?`;
+      params = [...userRoles, 'active'];
+    }
+
+    const [users] = await db.query(query, params);
+    const recipients = users.map(u => u.id);
+
+    if (!recipients.length) return res.status(400).json({ message: "No recipients found for broadcast" });
+
+    // Insert notification
+    const [notifRes] = await db.query(
+      `INSERT INTO notifications (title, message, type, priority, category, data, action_url, expires_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, message, type || 'info', priority || 'medium', category || 'general', data || null, actionUrl || null, expiresAt || null, createdBy]
+    );
+
+    const notificationId = notifRes.insertId;
+
+    // Insert recipients
+    const values = recipients.map(() => '(?, ?)').join(', ');
+    const paramsRecipients = [];
+    recipients.forEach(userId => paramsRecipients.push(notificationId, userId));
+    await db.query(`INSERT INTO notification_recipients (notification_id, user_id) VALUES ${values}`, paramsRecipients);
+
+    // Fetch created notification
+    const [notifRows] = await db.query("SELECT * FROM notifications WHERE id = ?", [notificationId]);
+
+    res.status(201).json({ success: true, notification: notifRows[0] });
+  } catch (err) {
+    console.error("Error creating broadcast:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ======================
+// Notification stats (admin only)
+// ======================
 export const getNotificationStats = async (req, res) => {
   try {
-    const total = await Notification.countDocuments({ status: 'active' });
-    
-    const typeStats = await Notification.aggregate([
-      { $match: { status: 'active' } },
-      {
-        $group: {
-          _id: '$type',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+    const [[{ total }]] = await db.query(`SELECT COUNT(*) AS total FROM notifications WHERE status='active'`);
+    const [typeStats] = await db.query(`SELECT type, COUNT(*) AS count FROM notifications WHERE status='active' GROUP BY type`);
+    const [priorityStats] = await db.query(`SELECT priority, COUNT(*) AS count FROM notifications WHERE status='active' GROUP BY priority`);
+    const [[{ recentNotifications }]] = await db.query(
+      `SELECT COUNT(*) AS recentNotifications FROM notifications WHERE status='active' AND created_at >= NOW() - INTERVAL 7 DAY`
+    );
 
-    const priorityStats = await Notification.aggregate([
-      { $match: { status: 'active' } },
-      {
-        $group: {
-          _id: '$priority',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    const recentNotifications = await Notification.countDocuments({
-      status: 'active',
-      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-    });
-
-    res.json({
-      total,
-      recentNotifications,
-      typeStats,
-      priorityStats
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.json({ total, recentNotifications, typeStats, priorityStats });
+  } catch (err) {
+    console.error("Error fetching notification stats:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
