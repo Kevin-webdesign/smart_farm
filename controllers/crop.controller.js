@@ -60,14 +60,11 @@ export const createCropPlan = async (req, res) => {
 // ======================
 export const getCropPlans = async (req, res) => {
   const userId = req.user.id;
-  const role = req.user.role;
 
   try {
     const [rows] = await db.query(
-      role === "admin"
-        ? "SELECT * FROM crop_plans ORDER BY created_at DESC"
-        : "SELECT * FROM crop_plans WHERE created_by=? ORDER BY created_at DESC",
-      role === "admin" ? [] : [userId]
+        "SELECT * FROM crop_plans WHERE created_by=? ORDER BY created_at DESC",
+       [userId]
     );
 
     const crops = await Promise.all(
@@ -87,6 +84,35 @@ export const getCropPlans = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// ======================
+// GET  all Crop Plans by staff
+// ======================
+export const getAllCropPlans = async (req, res) => {
+
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM crop_plans ORDER BY created_at DESC"
+    );
+
+    const crops = await Promise.all(
+      rows.map(async (crop) => {
+        const [userRes] = await db.query(
+          "SELECT id, username, email, role, phone, address_district, address_sector, address_cell, address_village FROM users WHERE id=?",
+          [crop.created_by]
+        );
+        crop.created_by = userRes[0];
+        return crop;
+      })
+    );
+
+    res.status(200).json({ success: true, data: crops });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
 // ======================
 // GET single Crop Plan

@@ -26,7 +26,7 @@ export const createTransaction = async (req, res) => {
 
     // Populate createdBy info
     const [userRows] = await db.query(
-      "SELECT id, username, email, phone, role, address, district, sector, cell, village, status FROM users WHERE id = ?",
+      "SELECT id, username, email, phone, role status FROM users WHERE id = ?",
       [userId]
     );
     transaction.created_by = userRows[0];
@@ -62,7 +62,7 @@ export const getAllTransactions = async (req, res) => {
 export const getPublicTransactions = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT ft.*, u.id AS user_id, u.username, u.email, u.phone, u.role, u.address, u.district, u.sector, u.cell, u.village, u.status
+      `SELECT ft.*, u.id AS user_id, u.username, u.email, u.phone, u.role , u.status
        FROM farm_transactions ft
        JOIN users u ON ft.created_by = u.id
        ORDER BY ft.date DESC`

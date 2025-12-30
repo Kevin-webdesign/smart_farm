@@ -7,7 +7,7 @@ CREATE TABLE users (
 
   password VARCHAR(255) NOT NULL,
 
-  role ENUM('admin', 'manager', 'client') DEFAULT 'client',
+  role VARCHAR(50) NOT NULL,
   status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
 
   address_district VARCHAR(255),

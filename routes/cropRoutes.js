@@ -5,6 +5,7 @@ import {
   createCropPlan,
   updateCropPlan,
   deleteCropPlan,
+  getAllCropPlans,
 } from "../controllers/crop.controller.js";
 import { protect } from "../middleware/auth.midleware.js";
 
@@ -14,7 +15,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get("/", getCropPlans);
-router.get("/staff",protect, getCropPlans);
+router.get("/staff",protect, getAllCropPlans);
 router.get("/:id",protect, getCropPlan);
 router.post("/",protect, createCropPlan);
 router.put("/:id", protect , updateCropPlan);

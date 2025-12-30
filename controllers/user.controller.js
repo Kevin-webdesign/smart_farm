@@ -54,7 +54,7 @@ export const getUserById = async (req, res) => {
 // Create new user
 export const createUser = async (req, res) => {
   try {
-    const { username, email, password, role = 'client', status = 'active', phone, address } = req.body;
+    const { username, email, password, role = 'farmer', status = 'active', phone, address } = req.body;
 
     const [exists] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
     if (exists.length) return res.status(400).json({ message: "Email already exists" });

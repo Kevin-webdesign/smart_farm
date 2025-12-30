@@ -16,7 +16,7 @@ router.use(protect);
 
 router.get('/stats', getUserStats);
 
-router.get('/', authorize(['admin', 'manager']), getAllUsers);
+router.get('/', getAllUsers);
 
 // Get user by ID
 router.get('/:id', getUserById);

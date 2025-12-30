@@ -15,6 +15,7 @@ import roleRoutes from "./routes/roleRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import farmTransactionRoutes from "./routes/farm.routes.js";
 import inputsRoutes from "./routes/inputsRoutes.js";
+import { initNotificationCronJobs } from "./services/notificationService.js";
 
 // Load env
 dotenv.config();
@@ -25,8 +26,6 @@ const app = express();
    CORS CONFIG
 ====================== */
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:3001",
   "http://localhost:8080",
   "http://localhost:8081",
 ];
@@ -89,4 +88,7 @@ app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT} (${process.env.NODE_ENV || "development"})`
   );
+   // Initialize notification cron jobs
+  initNotificationCronJobs();
 });
+

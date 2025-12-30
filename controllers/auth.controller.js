@@ -39,9 +39,8 @@ export const createAdminUser = async () => {
       ]
     );
     console.log({ message: "Admin User created successfully" });
-
   } catch (err) {
-    console.error("Server error ".err  );
+    console.error("Server error ".err);
   }
 };
 createAdminUser();
@@ -51,32 +50,38 @@ createAdminUser();
 // ======================
 
 export const registerUser = async (req, res) => {
-  const { username, email, password, phone, role, address } = req.body;
+  const { username, email, password, phone, address } = req.body;
+  const role = req.body.role || "farmer";
 
   try {
     if (!username || !email || !password)
-      return res.status(400).json({ message: "Username, email, and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Username, email, and password are required" });
 
-    const existingUser = await db.query(
-      "SELECT id FROM users WHERE email = $1",
+    // FIXED: Use ? placeholders consistently (MySQL style)
+    const [existingUsers] = await db.execute(
+      "SELECT id FROM users WHERE email = ? AND deleted_at IS NULL",
       [email]
     );
-    if (existingUser.rows.length)
+
+    if (existingUsers.length > 0) {
       return res.status(400).json({ message: "Email already in use" });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const newUser = await db.query(
+    // FIXED: Use ? placeholders consistently
+    const [result] = await db.execute(
       `INSERT INTO users
        (username, email, password, phone, role, address_district, address_sector, address_cell, address_village)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING id, username, email, role, status, phone`,
+       VALUES (?,?,?,?,?,?,?,?,?)`,
       [
         username,
         email,
         hashedPassword,
         phone || null,
-        role || "client",
+        role || "farmer",
         address?.district || null,
         address?.sector || null,
         address?.cell || null,
@@ -84,21 +89,41 @@ export const registerUser = async (req, res) => {
       ]
     );
 
+    // Get the newly created user
+    const [newUserRows] = await db.execute(
+      "SELECT id, username, email, role, status, phone, address_district, address_sector, address_cell, address_village FROM users WHERE id = ?",
+      [result.insertId]
+    );
+
+    const newUser = newUserRows[0];
+
     // Generate JWT
-    const token = generateToken(newUser.rows[0].id);
+    const token = generateToken(newUser.id);
 
     res.status(201).json({
       success: true,
       message: "User created successfully",
-      user: newUser.rows[0],
-      token, // <-- send token to client
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        role: newUser.role,
+        status: newUser.status,
+        phone: newUser.phone,
+        address: {
+          district: newUser.address_district,
+          sector: newUser.address_sector,
+          cell: newUser.address_cell,
+          village: newUser.address_village,
+        },
+      },
+      token,
     });
   } catch (err) {
     console.error("Register user error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
-
 // ======================
 // Login
 // ======================
@@ -106,8 +131,10 @@ export const login = async (req, res) => {
   const { email, phone, password } = req.body;
 
   try {
-    if (!password) return res.status(400).json({ message: "Password required" });
-    if (!email && !phone) return res.status(400).json({ message: "Email or phone required" });
+    if (!password)
+      return res.status(400).json({ message: "Password required" });
+    if (!email && !phone)
+      return res.status(400).json({ message: "Email or phone required" });
 
     const query = email
       ? "SELECT * FROM users WHERE email = ? AND deleted_at IS NULL"
@@ -134,7 +161,7 @@ export const login = async (req, res) => {
         phone: user.phone,
         role: user.role,
         status: user.status,
-      }
+      },
     });
   } catch (err) {
     console.error(err);
@@ -168,10 +195,11 @@ export const forgotPassword = async (req, res) => {
     const otp = generateOtp();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-    await db.execute(
-      "UPDATE users SET otp = ?, otp_expires = ? WHERE id = ?",
-      [otp, otpExpires, user.id]
-    );
+    await db.execute("UPDATE users SET otp = ?, otp_expires = ? WHERE id = ?", [
+      otp,
+      otpExpires,
+      user.id,
+    ]);
 
     await sendOtpEmail(user.email, otp);
 
@@ -235,7 +263,9 @@ export const resetPassword = async (req, res) => {
 
   try {
     if (!email || !newPassword)
-      return res.status(400).json({ message: "Email and new password are required!" });
+      return res
+        .status(400)
+        .json({ message: "Email and new password are required!" });
 
     const [rows] = await db.execute(
       "SELECT * FROM users WHERE email = ? AND deleted_at IS NULL",
@@ -247,22 +277,29 @@ export const resetPassword = async (req, res) => {
     if (resetToken) {
       try {
         const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
-        if (decoded.userId !== user.id || decoded.purpose !== "password_reset") {
+        if (
+          decoded.userId !== user.id ||
+          decoded.purpose !== "password_reset"
+        ) {
           return res.status(400).json({ message: "Invalid reset token." });
         }
       } catch {
-        return res.status(400).json({ message: "Invalid or expired reset token." });
+        return res
+          .status(400)
+          .json({ message: "Invalid or expired reset token." });
       }
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    await db.execute(
-      "UPDATE users SET password = ? WHERE id = ?",
-      [hashedPassword, user.id]
-    );
+    await db.execute("UPDATE users SET password = ? WHERE id = ?", [
+      hashedPassword,
+      user.id,
+    ]);
 
-    res.status(200).json({ success: true, message: "Password reset successfully." });
+    res
+      .status(200)
+      .json({ success: true, message: "Password reset successfully." });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -282,20 +319,18 @@ export const getProfile = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found." });
 
     res.status(200).json({
-      _id: user.id,
+      id: user.id,
       username: user.username,
       email: user.email,
       role: user.role,
       status: user.status,
-      address: {
-        district: user.address_district,
-        sector: user.address_sector,
-        cell: user.address_cell,
-        village: user.address_village,
-      },
+      address_district: user.address_district,
+      address_sector: user.address_sector,
+      address_cell: user.address_cell,
+      address_village: user.address_village,
       phone: user.phone,
-      createdAt: user.created_at,
-      updatedAt: user.updated_at,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
     });
   } catch (err) {
     console.error(err);
@@ -309,7 +344,7 @@ export const getProfile = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { username, email, phone, address } = req.body;
+    const { username, email, phone, address_district ,address_sector , address_cell ,address_village } = req.body;
 
     // Check if email is already in use
     if (email) {
@@ -337,10 +372,10 @@ export const updateProfile = async (req, res) => {
         username,
         email,
         phone,
-        address?.district || null,
-        address?.sector || null,
-        address?.cell || null,
-        address?.village || null,
+        address_district || null,
+        address_sector || null,
+        address_cell || null,
+        address_village || null,
         req.user.id,
       ]
     );
@@ -352,7 +387,8 @@ export const updateProfile = async (req, res) => {
     );
 
     const updatedUser = userRows[0];
-    if (!updatedUser) return res.status(404).json({ message: "User not found" });
+    if (!updatedUser)
+      return res.status(404).json({ message: "User not found" });
 
     res.status(200).json({
       success: true,
