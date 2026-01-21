@@ -1,3 +1,6 @@
+CREATE DATABASE IF NOT EXISTS `farm_management_system`;
+USE `farm_management_system`;
+
 CREATE TABLE users (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   username VARCHAR(100) NOT NULL,

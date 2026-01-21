@@ -17,7 +17,7 @@ import farmTransactionRoutes from "./routes/farm.routes.js";
 import inputsRoutes from "./routes/inputsRoutes.js";
 import { initNotificationCronJobs } from "./services/notificationService.js";
 
-// Load env
+
 dotenv.config();
 
 const app = express();
@@ -91,4 +91,3 @@ app.listen(PORT, () => {
    // Initialize notification cron jobs
   initNotificationCronJobs();
 });
-

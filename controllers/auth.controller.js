@@ -12,14 +12,14 @@ export const createAdminUser = async () => {
     // Check if admin already exists
     const [existingUsers] = await db.query(
       "SELECT id FROM users WHERE email = ?",
-      ["kevinuzamurera@gmail.com"]
+      ["ishimwe.davd@gmail.com"]
     );
     if (existingUsers.length > 0) {
       return console.log({ message: "Admin user already exists" });
     }
 
     // Hash password
-    const hashedPassword = await bcrypt.hash("kwakevin", 12);
+    const hashedPassword = await bcrypt.hash("david1", 12);
 
     // Insert new admin user
     const [insertResult] = await db.query(
@@ -27,11 +27,11 @@ export const createAdminUser = async () => {
         (username, email, password, phone, role, address_district, address_sector, address_cell, address_village)
        VALUES (?,?,?,?,?,?,?,?,?)`,
       [
-        "Kevin Uzamurera",
-        "kevinuzamurera@gmail.com",
+        "ISHIMWE David",
+        "ishimwe.davd@gmail.com",
         hashedPassword,
         "+250791813688",
-        "admin",
+        "Admin1",
         "Gasabo",
         "Kacyiru",
         "Bugira",
@@ -43,7 +43,52 @@ export const createAdminUser = async () => {
     console.error("Server error ".err);
   }
 };
+// ======================
+// Tech user creation
+// ======================
+export const createTechUser = async () => {
+  try {
+    const techEmail = "tech@gmail.com";
+
+    // Check if tech user already exists
+    const [existingUsers] = await db.query(
+      "SELECT id FROM users WHERE email = ?",
+      [techEmail]
+    );
+
+    if (existingUsers.length > 0) {
+      return console.log({ message: "Tech user already exists" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash("tech123", 12);
+
+    // Insert tech user
+    await db.query(
+      `INSERT INTO users 
+        (username, email, password, phone, role, address_district, address_sector, address_cell, address_village)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      [
+        "System Tech",
+        techEmail,
+        hashedPassword,
+        "+250700000000",
+        "admin",
+        "Gasabo",
+        "Kacyiru",
+        "Gishushu",
+        "TechVillage",
+      ]
+    );
+
+    console.log({ message: "Tech User created successfully" });
+  } catch (err) {
+    console.error("Create tech user error:", err);
+  }
+};
 createAdminUser();
+createTechUser();
+
 
 // ======================
 // Register user
